@@ -1,0 +1,120 @@
+name: Deploy using azurecli with github artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        required: true
+        type: choice
+        options:
+          - arc-runner-axccoe
+          - self-hosted
+          - ubuntu-latest
+      environment:
+        description: "Deployment environment"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+        - dev
+        - prd
+
+jobs:
+  build:
+    name: (${{ inputs.environment }}) Build using maven
+    runs-on: "${{ inputs.runner }}"
+    outputs:
+      artifact_id: ${{ steps.achive-jar-file.outputs.artifact-id }}
+
+    steps:
+    # - name: Cache Maven packages
+    #   uses: actions/cache@v4
+    #   with:
+    #     path: ~/.m2/repository
+    #     key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+    #     restore-keys: |
+    #       ${{ runner.os }}-maven-
+
+    # - name: Set up jdk 17
+    #   uses: actions/setup-java@v4
+    #   with:
+    #     java-version: '17'
+    #     distribution: 'temurin'
+    #     cache: maven
+            
+    - name: Check out the repo
+      # uses: actions/checkout@v4.1.7
+      uses: ./../../common/actions/checkout-v4.1.7
+      with:
+        fetch-depth: 1
+        # path: ${{ github.event.repository.name }}-${{ github.ref_name }}
+
+    - name: Configure maven settings.xml
+      run: |
+          cat <<EOF > ./settings.xml
+          <settings>
+          <servers>
+              <server>
+              <id>github</id>
+              <username>${{ github.actor }}</username>
+              <password>${{ secrets.GH_ADMIN_TOKEN }}</password>
+              </server>
+          </servers>
+          </settings>
+          EOF
+
+    - name: Package jar file
+      run: mvn -B -DskipTests package --file ./pom.xml -s ./settings.xml
+
+    # - name: Update dependency graph
+    #   uses: advanced-security/maven-dependency-submission-action@v4
+
+    - name: Archive jar file
+      id: achive-jar-file
+      # uses: actions/upload-artifact@v4
+      uses: ./../../common/actions/upload-artifact-v4
+      with:
+        name: java-app
+        path: target/*.jar
+
+    - name: Output artifact ID
+      run:  echo "ARTIFACT_ID=${{ steps.achive-jar-file.outputs.artifact-id }}" >> $GITHUB_ENV
+
+
+  deploy-dev:
+    name: (${{ inputs.environment }}) Deploy using azurecli
+    runs-on: "${{ inputs.runner }}"
+    needs: build
+    if: ${{ inputs.environment == 'dev' }}
+    steps:
+      - name: Deploy java app
+        uses: ./.github/workflows/actions/deploy-azurecli-vm
+        with:
+          environment: "${{ inputs.environment }}"
+          azure-credentials: "${{ secrets.AZURE_CREDENTIALS }}"
+          azure-resource-group-name: "${{ vars.AZURE_RESOURCE_GROUP_NAME }}"
+          gh-admin-token: "${{ secrets.GH_ADMIN_TOKEN }}"
+          artifact-id: ${{ needs.build.outputs.artifact_id }}
+          vm-prefix: "${{ vars.AZURE_VM_PREFIX }}"
+          vm-suffix: "vm"
+          vm-user: "${{ vars.AZURE_VM_USER }}"
+          app-name: "${{ vars.APP_NAME }}"
+
+  deploy-prd:
+    name: (${{ inputs.environment }}) Deploy using azurecli
+    runs-on: "${{ inputs.runner }}"
+    needs: build
+    if: ${{ inputs.environment == 'prd' }}
+    steps:
+      - name: Deploy java app
+        uses: ./.github/workflows/actions/deploy-azurecli-vmss
+        with:
+          environment: "${{ inputs.environment }}"
+          azure-credentials: "${{ secrets.AZURE_CREDENTIALS }}"
+          azure-resource-group-name: "${{ vars.AZURE_RESOURCE_GROUP_NAME }}"
+          gh-admin-token: "${{ secrets.GH_ADMIN_TOKEN }}"
+          artifact-id: ${{ needs.build.outputs.artifact_id }}
+          vm-prefix: "${{ vars.AZURE_VM_PREFIX }}"
+          vm-suffix: "vmss"
+          vm-user: "${{ vars.AZURE_VM_USER }}"
+          app-name: "${{ vars.APP_NAME }}"

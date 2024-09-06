@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mvp-thymeleaf-jdk17
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: mvp-thymeleaf-jdk17-prd.20.249.190.36.nip.io
+    http:
+      paths:
+      - pathType: Prefix
+        path: /
+        backend:
+          service:
+            name: mvp-thymeleaf-jdk17
+            port:
+              number: 8080

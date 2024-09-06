@@ -1,0 +1,49 @@
+name: Deploy Java App
+description: Deploy Java Application to VM using ssh ans scp
+inputs:
+  environment:
+    required: true
+    default: ""
+  ssh-private-key:
+    required: true
+    default: ""
+  vm-prefix:
+    required: true
+    default: ""
+  vm-suffix:
+    required: true
+    default: ""
+  vm-ip:
+    required: true
+    default: ""
+  vm-user:
+    required: true
+    default: ""
+  app-name:
+    required: true
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up ssh private key
+      run: |
+        mkdir -p ~/.ssh/
+        echo "${{ inputs.ssh-private-key }}" > ~/.ssh/${{ inputs.vm-prefix }}-${{ inputs.environment }}-${{ inputs.vm-suffix }}.pem
+        chmod 600 ~/.ssh/${{ inputs.vm-prefix }}-${{ inputs.environment }}-${{ inputs.vm-suffix }}.pem
+      shell: bash
+
+    - name: Upload jar file to target VM
+      run: |
+        scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/${{ inputs.vm-prefix }}-${{ inputs.environment }}-${{ inputs.vm-suffix }}.pem ./target/*.jar \
+          ${{ inputs.vm-user }}@${{ inputs.vm-ip }}:/home/${{ inputs.vm-user }}/${{ inputs.app-name }}.jar
+      shell: bash      
+
+    - name: Run java application
+      run: |  
+        ssh -i ~/.ssh/${{ inputs.vm-prefix }}-${{ inputs.environment }}-${{ inputs.vm-suffix }}.pem -o StrictHostKeyChecking=no ${{ inputs.vm-user }}@${{ inputs.vm-ip }} << 'EOF'
+          set -e
+          sudo pkill -f "${{ inputs.app-name }}.jar" || true
+          nohup java -jar /home/${{ inputs.vm-user }}/${{ inputs.app-name }}.jar --spring.profiles.active=${{ inputs.environment }} >> /home/${{ inputs.vm-user }}/${{ inputs.app-name }}.log 2>&1 &
+        EOF
+      shell: bash

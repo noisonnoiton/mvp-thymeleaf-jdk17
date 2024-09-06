@@ -1,0 +1,9 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mvp-thymeleaf-jdk17
+spec:
+  destination:
+    namespace: mvp-thymeleaf-prd
+  source:
+    path: manifests/overlays/prd

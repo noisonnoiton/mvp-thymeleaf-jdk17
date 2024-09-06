@@ -1,0 +1,23 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: mvp-thymeleaf-dev
+
+resources:
+- ../../base
+
+patches:
+- path: ./deployment-patches.yaml
+  target:
+    kind: Deployment
+- path: ./ingress-patches.yaml
+  target:
+    kind: Ingress
+
+images:
+- name: axccoe/mvp-thymeleaf-jdk17
+  newName: tiuaxcoetmpacr.azurecr.io/axccoe/mvp-thymeleaf-jdk17-dev
+  newTag: "20240902075003"
+
+resources:
+- ../../base

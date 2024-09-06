@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mvp-thymeleaf-jdk17
+  namespace: argocd
+spec:
+  destination:
+    name: in-cluster
+    namespace: mvp-thymeleaf-dev
+    server: ''
+  source:
+    path: manifests/overlays/dev
+    repoURL: https://github.com/axccoe/mvp-thymeleaf-jdk17.git
+    targetRevision: main
+  sources: []
+  project: default
+  syncPolicy:
+    automated: null
+    syncOptions:
+      - CreateNamespace=true

@@ -1,0 +1,104 @@
+name: Deploy Java App
+description: Deploy Java Application to VM using ssh ans scp
+inputs:
+  environment:
+    required: true
+    default: ""
+  azure-credentials:
+    required: true
+    default: ""
+  azure-resource-group-name:
+    required: true
+    default: ""
+  gh-admin-token:
+    required: true
+    default: ""
+  artifact-id:
+    required: true
+    default: ""    
+  vm-prefix:
+    required: true
+    default: ""
+  vm-suffix:
+    required: true
+    default: ""
+  vm-user:
+    required: true
+    default: ""
+  app-name:
+    required: true
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Log in to Azure CLI
+      env:
+        AZURE_CREDENTIALS: ${{ inputs.azure-credentials }}
+      run: |
+        echo "$AZURE_CREDENTIALS" > azure_credentials.json
+        az login \
+          --service-principal \
+          --username $(jq -r .clientId azure_credentials.json) \
+          --password $(jq -r .clientSecret azure_credentials.json) \
+          --tenant $(jq -r .tenantId azure_credentials.json)
+        az account set --subscription $(jq -r .subscriptionId azure_credentials.json)
+      shell: bash
+
+    - name: Extract VM IDs
+      run: |
+        echo "TARGET_VM_IDS=$(
+          az vmss list-instances \
+            --name ${{ inputs.vm-prefix }}-${{ inputs.environment }}-${{ inputs.vm-suffix }} \
+            --resource-group ${{ inputs.azure-resource-group-name }} \
+            --query '[].id' --output tsv  | paste -sd " " -
+        )" >> $GITHUB_ENV
+      shell: bash
+
+    - name: Download jar file from github artifacts
+      env:
+        ARTIFACT_ID: ${{ inputs.artifact-id }}
+        TARGET_VM_IDS: ${{ env.TARGET_VM_IDS }}
+      run: |
+          az vmss run-command invoke \
+            --command-id RunShellScript \
+            --ids ${{ env.TARGET_VM_IDS }} \
+            --scripts '
+              set -e
+              curl -L \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer ${{ inputs.gh-admin-token }}" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                https://api.github.com/repos/${{ github.repository }}/actions/artifacts/${{ inputs.artifact-id }}/zip \
+                -o /home/${{ inputs.vm-user }}/${{ inputs.app-name }}.zip || { echo "Download failed"; exit 1; }
+
+              chown ${{ inputs.vm-user }}:${{ inputs.vm-user }} /home/${{ inputs.vm-user }}/${{ inputs.app-name }}.zip
+
+              sudo -u azureadmin bash -c "
+                set -e
+                mkdir -p /home/${{ inputs.vm-user }}/${{ inputs.app-name }}
+                unzip /home/${{ inputs.vm-user }}/${{ inputs.app-name }}.zip -d /home/${{ inputs.vm-user }}/${{ inputs.app-name }}/ || { echo \"Unzip failed\"; exit 1; }
+                mv /home/${{ inputs.vm-user }}/${{ inputs.app-name }}/*.jar /home/${{ inputs.vm-user }}/${{ inputs.app-name }}.jar || { echo \"Move file failed\"; exit 1; }
+              "
+            '
+      shell: bash
+
+
+    - name: Run java application to vmss
+      env:
+        TARGET_VM_IDS: ${{ env.TARGET_VM_IDS }}
+      run: |
+          set -e
+
+          az vmss run-command invoke \
+            --command-id RunShellScript \
+            --ids ${{ env.TARGET_VM_IDS }} \
+            --scripts '
+              set -e
+              sudo pkill -f "${{ inputs.app-name }}.jar"
+              sudo -u azureadmin bash -c "
+                set -e
+                nohup java -jar /home/${{ inputs.vm-user }}/${{ inputs.app-name }}.jar --spring.profiles.active=${{ inputs.environment }} >> /home/${{ inputs.vm-user }}/${{ inputs.app-name }}.log 2>&1 &
+              "
+            '
+      shell: bash
